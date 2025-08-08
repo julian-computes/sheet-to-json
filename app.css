@@ -1,0 +1,327 @@
+:root {
+    --bg: #f7f9fc;
+    /* page background */
+    --surface: #ffffff;
+    /* card background */
+    --fg: #0f172a;
+    /* primary text */
+    --muted: #64748b;
+    /* secondary text */
+    --border: #e2e8f0;
+    /* borders/dividers */
+    --accent: #3b82f6;
+    /* primary action */
+    --danger: #dc2626;
+    --ok: #16a34a;
+    --warn: #d97706;
+}
+
+/* Dark theme controlled by data-theme on <html> */
+:root[data-theme="dark"] {
+    --bg: #0f172a;
+    --surface: #111827;
+    --fg: #e2e8f0;
+    --muted: #94a3b8;
+    --border: #1f2a37;
+    --accent: #60a5fa;
+    --danger: #ef4444;
+    --ok: #22c55e;
+    --warn: #f59e0b;
+}
+
+html,
+body {
+    height: 100%;
+}
+
+body {
+    margin: 0;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.5;
+}
+
+.container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 24px 16px 64px;
+}
+
+h1 {
+    font-size: 22px;
+    margin: 0 0 8px;
+}
+
+.sub {
+    color: var(--muted);
+    margin-bottom: 20px;
+}
+
+.card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.grid {
+    display: grid;
+    gap: 16px;
+}
+
+.grid.cols-2 {
+    grid-template-columns: 1fr 1fr;
+}
+
+.grid.cols-3 {
+    grid-template-columns: 1fr 1fr 1fr;
+}
+
+.row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+label {
+    font-weight: 600;
+}
+
+input[type="text"],
+input[type="number"],
+select,
+textarea {
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 14px;
+    transition: border-color 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+}
+
+input[type="file"] {
+    font-size: 14px;
+}
+
+input[type="text"]:focus,
+input[type="number"]:focus,
+select:focus,
+textarea:focus {
+    outline: none;
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+    background: color-mix(in srgb, var(--surface) 96%, var(--accent) 4%);
+}
+
+button {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background-color 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+}
+
+button.secondary {
+    background: transparent;
+    color: var(--fg);
+    border: 1px solid var(--border);
+}
+
+button.danger {
+    background: var(--danger);
+}
+
+button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+button:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent) 88%, #000000 12%);
+}
+
+button.secondary:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+th,
+td {
+    text-align: left;
+    padding: 8px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+}
+
+th {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    color: var(--muted);
+}
+
+.pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface) 92%, #ffffff 8%);
+    color: var(--muted);
+}
+
+.muted {
+    color: var(--muted);
+}
+
+.hint {
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.status-ok {
+    color: var(--ok);
+    font-weight: 600;
+}
+
+.status-warn {
+    color: var(--warn);
+    font-weight: 600;
+}
+
+.status-bad {
+    color: var(--danger);
+    font-weight: 600;
+}
+
+.divider {
+    height: 1px;
+    background: var(--border);
+    margin: 16px 0;
+}
+
+.progress {
+    width: 100%;
+    height: 10px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--border) 70%, transparent);
+    overflow: hidden;
+}
+
+.progress>div {
+    height: 100%;
+    background: var(--accent);
+    width: 0%;
+    transition: width 120ms linear;
+}
+
+pre {
+    background: color-mix(in srgb, var(--surface) 94%, #ffffff 6%);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    overflow: auto;
+}
+
+code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 12px;
+}
+
+.scroll {
+    max-height: 300px;
+    overflow: auto;
+}
+
+/* Preview section with balanced height */
+.preview-scroll {
+    max-height: 400px;
+    overflow: auto;
+}
+
+.nowrap {
+    white-space: nowrap;
+}
+
+.right {
+    text-align: right;
+}
+
+.mb-8 {
+    margin-bottom: 8px;
+}
+
+.mb-12 {
+    margin-bottom: 12px;
+}
+
+.mb-16 {
+    margin-bottom: 16px;
+}
+
+.mb-24 {
+    margin-bottom: 24px;
+}
+
+.mr-8 {
+    margin-right: 8px;
+}
+
+/* File input styling improvements */
+input[type="file"] {
+    font-size: 14px;
+    padding: 8px 0;
+    min-width: 200px;
+}
+
+/* Give file input row more breathing room */
+.file-input-row {
+    align-items: flex-start;
+    gap: 16px;
+}
+
+.file-input-row .pill {
+    margin-left: 8px;
+}
+
+/* Rules table improvements */
+.rules-table input[type="text"] {
+    max-width: 280px;
+    width: 100%;
+}
+
+/* Source column select width */
+.rules-table select {
+    min-width: 180px;
+    max-width: 240px;
+}
+
+/* Better spacing in form sections */
+.form-section {
+    margin-bottom: 20px;
+}
+
+.form-section:last-child {
+    margin-bottom: 0;
+}
+
+/* Improve spacing around file upload area */
+.upload-section .row {
+    margin-bottom: 8px;
+}
+
+.upload-section .hint {
+    margin-top: 4px;
+}

@@ -1,0 +1,831 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sheet to JSON</title>
+    <meta name="description"
+        content="Convert spreadsheet rows to individual JSON files using mapping rules. All in-browser." />
+    
+    <!-- Favicons -->
+    <link rel="apple-touch-icon" sizes="180x180" href="favicon/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="favicon/favicon-16x16.png">
+    <link rel="icon" type="image/x-icon" href="favicon/favicon.ico">
+    
+    <link rel="stylesheet" href="app.css" />
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+</head>
+
+<body>
+    <div class="container" x-data="app()" x-init="init()">
+        <div class="row" style="justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <h1 style="margin: 0;">Sheet to JSON</h1>
+            <div class="row" style="gap:8px;">
+                <button class="secondary" @click="toggleTheme()" :aria-pressed="theme === 'dark'"
+                    aria-label="Toggle theme">
+                    <span x-text="theme === 'dark' ? 'Dark mode' : 'Light mode'"></span>
+                </button>
+            </div>
+        </div>
+        <div class="sub">Convert spreadsheets to a ZIP of JSON files using simple mapping rules. All processing happens
+            locally.</div>
+
+        <div class="grid cols-2 mb-24">
+            <div class="card">
+                <div class="mb-16 upload-section">
+                    <label class="mb-8" for="file-input">1) Upload spreadsheet (.xlsx, .csv, .xls)</label>
+                    <div class="row file-input-row">
+                        <input id="file-input" name="file" type="file" @change="onFileChange($event)"
+                            accept=".xlsx,.csv,.xls" />
+                        <template x-if="fileName">
+                            <span class="pill" x-text="fileName"></span>
+                        </template>
+                    </div>
+                    <div class="hint">No data leaves your device.</div>
+                </div>
+                <template x-if="sheets.length > 1">
+                    <div class="mb-16">
+                        <label class="mb-8" for="sheet-select">2) Choose a sheet</label>
+                        <div class="row">
+                            <select id="sheet-select" name="sheet" x-model="selectedSheet" @change="onSheetChange()">
+                                <template x-for="s in sheets" :key="s">
+                                    <option :value="s" x-text="s"></option>
+                                </template>
+                            </select>
+                            <span class="hint" x-text="`${rowCount.toLocaleString()} rows (capped at 65,536)`"></span>
+                        </div>
+                    </div>
+                </template>
+
+                <div class="mb-16 form-section">
+                    <label>Detected columns</label>
+                    <div class="scroll" style="max-height: 88px;">
+                        <div class="row" style="flex-wrap: wrap; gap: 6px;">
+                            <template x-for="col in columns" :key="col">
+                                <span class="pill" x-text="col"></span>
+                            </template>
+                            <template x-if="!columns || columns.length === 0">
+                                <span class="muted">No columns detected yet.</span>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-16 form-section">
+                    <label>Options</label>
+                    <div class="row">
+                        <label class="row" style="gap:6px;">
+                            <input id="blanks-as-null" name="blanksAsNull" type="checkbox"
+                                x-model="options.blanksAsNull" />
+                            <span>Blanks as null</span>
+                        </label>
+                    </div>
+                </div>
+
+
+
+                <div class="divider"></div>
+
+                <div class="row">
+                    <button :disabled="!canExport || isExporting || rows.length === 0" @click="startExport()">Export
+                        ZIP</button>
+                    <button class="secondary" :disabled="rows.length === 0 || isExporting"
+                        @click="resetAll()">Reset</button>
+                    <button class="secondary" @click="shareLink()">Share link</button>
+                </div>
+
+                <template x-if="isExporting">
+                    <div class="mb-16" style="margin-top: 14px;">
+                        <div class="row" style="justify-content: space-between;">
+                            <div>
+                                <strong>Exporting…</strong>
+                                <span class="muted" x-text="exportStatusText"></span>
+                            </div>
+                            <button class="danger" @click="cancelExport()">Cancel</button>
+                        </div>
+                        <div class="progress" style="margin-top: 8px;">
+                            <div :style="`width: ${exportProgressPct}%;`"></div>
+                        </div>
+                    </div>
+                </template>
+
+                <template x-if="errorMessage">
+                    <div class="mb-16" style="margin-top: 10px; color: var(--danger);">
+                        <strong>Error:</strong> <span x-text="errorMessage"></span>
+                    </div>
+                </template>
+            </div>
+
+            <div class="card">
+                <div class="row mb-8" style="justify-content: space-between; align-items: baseline;">
+                    <div>
+                        <label>Preview</label>
+                        <span class="muted">Showing first <span x-text="previewRows.length"></span> rows (max 50)</span>
+                    </div>
+                </div>
+                <div class="hint mb-8">Preview updates on demand to keep things fast. Theme and rules are shareable via the Share.</div>
+                <div class="row mb-12">
+                    <button class="secondary" :disabled="rows.length === 0 || isExporting" @click="refreshPreview()">Refresh preview</button>
+                </div>
+                <div class="scroll preview-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="width: 220px;">Filename</th>
+                                <th>JSON</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="item in previewRows" :key="item.index">
+                                <tr>
+                                    <td class="nowrap"><code x-text="item.filename"></code></td>
+                                    <td>
+                                        <pre><code x-text="item.json"></code></pre>
+                                    </td>
+                                </tr>
+                            </template>
+                            <template x-if="previewRows.length === 0">
+                                <tr>
+                                    <td colspan="2" class="muted">No preview available.</td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="row mb-8" style="justify-content: space-between; align-items: baseline;">
+                <div>
+                    <label>Filename Rules</label>
+                    <div class="hint">Configure how JSON files are named when exported to ZIP</div>
+                </div>
+            </div>
+            
+            <div class="grid cols-3" style="gap: 16px; align-items: end;">
+                <div>
+                    <label class="mb-8" for="filename-mode">Filename source</label>
+                    <select id="filename-mode" name="filenameMode" aria-label="Filename rule mode"
+                        x-model="filenameRule.mode" @change="onFilenameRuleChange()">
+                        <option value="rowIndex">Row number</option>
+                        <option value="column">Column value</option>
+                    </select>
+                </div>
+                
+                <template x-if="filenameRule.mode === 'column'">
+                    <div>
+                        <label class="mb-8" for="filename-column">Source column</label>
+                        <select id="filename-column" name="filenameColumn" aria-label="Filename rule column"
+                            x-model="filenameRule.column">
+                            <option value="">-- choose column --</option>
+                            <template x-for="col in columns" :key="'fn-'+col">
+                                <option :value="col" x-text="col"></option>
+                            </template>
+                        </select>
+                    </div>
+                </template>
+                
+                <div>
+                    <label class="mb-8" for="filename-suffix">Optional suffix</label>
+                    <input id="filename-suffix" name="filenameSuffix" type="text" 
+                        placeholder="e.g., _data" x-model.trim="filenameRule.suffix" 
+                        @input="refreshPreview()" style="max-width: 150px;" />
+                </div>
+            </div>
+            
+            <div class="hint" style="margin-top: 12px;">
+                Extension is always .json; invalid names fall back to row number. 
+                <template x-if="filenameRule.suffix">
+                    Example filename: <code><span x-text="getExampleFilename()"></span></code>
+                </template>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="row mb-8" style="justify-content: space-between; align-items: baseline;">
+                <div>
+                    <label>Rules: Source Column → Target JSON Path</label>
+                    <div class="hint">Path examples: <code>a.b.c</code>, <code>a[0]</code>, <code>a[].b</code>,
+                        <code>a["x.y"]</code>
+                    </div>
+                </div>
+                <button class="secondary" @click="addRule()">Add rule</button>
+            </div>
+
+            <table class="rules-table">
+                <thead>
+                    <tr>
+                        <th style="width: 260px;">Source Column</th>
+                        <th>Target Path</th>
+                        <th style="width: 180px;">Status</th>
+                        <th class="right" style="width: 80px;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="(r, idx) in rules" :key="r.id">
+                        <tr>
+                            <td>
+                                <select :id="'rule-source-'+r.id" :name="'rule-source-'+r.id"
+                                    :aria-label="'Source column for rule '+(idx+1)" x-model="r.source"
+                                    @change="validateRules()">
+                                    <option value="">-- choose --</option>
+                                    <template x-for="col in columns" :key="'r-'+r.id+'-'+col">
+                                        <option :value="col" x-text="col"></option>
+                                    </template>
+                                </select>
+                            </td>
+                            <td>
+                                <input :id="'rule-target-'+r.id" :name="'rule-target-'+r.id"
+                                    aria-label="Target JSON path" type="text" placeholder="e.g., customer.address.city"
+                                    x-model.trim="r.target" @input="validateRules()" />
+                                <div class="hint" x-show="r.error" x-text="r.error"></div>
+                            </td>
+                            <td>
+                                <template x-if="r.error && columns && columns.length > 0">
+                                    <span class="status-bad">Invalid</span>
+                                </template>
+                                <template x-if="!r.error && r.missingSource && columns && columns.length > 0">
+                                    <span class="status-warn">Missing column</span>
+                                </template>
+                                <template x-if="!r.error && !r.missingSource && r.source && r.target && columns && columns.length > 0">
+                                    <span class="status-ok">OK</span>
+                                </template>
+                            </td>
+                            <td class="right">
+                                <button class="secondary" @click="removeRule(idx)">Remove</button>
+                            </td>
+                        </tr>
+                    </template>
+                    <template x-if="rules.length === 0">
+                        <tr>
+                            <td colspan="4" class="muted">No rules added yet.</td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="sub" style="margin-top: 16px;">
+            This tool runs entirely in your browser. Libraries: Alpine.js, SheetJS, JSZip, FileSaver.
+        </div>
+    </div>
+
+    <script>
+        function app() {
+            return {
+                // File / workbook state
+                fileName: '',
+                workbook: null,
+                sheets: [],
+                selectedSheet: '',
+                columns: [],
+                rows: [],
+                rowCount: 0,
+
+                // Rules and options
+                rules: [],
+                options: { blanksAsNull: false },
+                filenameRule: { mode: 'rowIndex', column: '', suffix: '' },
+
+                // Preview
+                previewRows: [],
+
+                // Export state
+                isExporting: false,
+                exportCurrent: 0,
+                exportTotal: 0,
+                exportProgressPct: 0,
+                exportCancelled: false,
+                errorMessage: '',
+
+                get canExport() {
+                    if (this.rules.length === 0) return false;
+                    const hasInvalid = this.rules.some(r => !!r.error || r.missingSource || !r.source || !r.target);
+                    return !hasInvalid;
+                },
+
+                init() {
+                    this.loadConfigFromURL();
+                    this.applyTheme();
+                },
+
+                resetAll() {
+                    this.fileName = '';
+                    this.workbook = null;
+                    this.sheets = [];
+                    this.selectedSheet = '';
+                    this.columns = [];
+                    this.rows = [];
+                    this.rowCount = 0;
+                    // Do not clear rules/options/filenameRule to preserve share links
+                    this.previewRows = [];
+                    this.isExporting = false;
+                    this.exportCurrent = 0;
+                    this.exportTotal = 0;
+                    this.exportProgressPct = 0;
+                    this.exportCancelled = false;
+                    this.errorMessage = '';
+                },
+
+                async onFileChange(evt) {
+                    this.resetAll();
+                    const file = evt.target.files && evt.target.files[0];
+                    if (!file) return;
+                    this.fileName = file.name;
+                    try {
+                        const ext = (file.name.split('.').pop() || '').toLowerCase();
+                        let wb;
+                        if (ext === 'csv') {
+                            const text = await file.text();
+                            wb = XLSX.read(text, { type: 'string' });
+                        } else {
+                            const ab = await file.arrayBuffer();
+                            wb = XLSX.read(ab, { type: 'array' });
+                        }
+                        this.workbook = wb;
+                        this.sheets = wb.SheetNames.slice();
+                        this.selectedSheet = this.sheets[0] || '';
+                        this.extractRowsAndColumns();
+                    } catch (err) {
+                        console.error(err);
+                        this.errorMessage = 'Failed to read file. Please ensure it\'s a valid .xlsx, .xls, or .csv file.';
+                    }
+                },
+
+                onSheetChange() {
+                    this.extractRowsAndColumns();
+                },
+
+                extractRowsAndColumns() {
+                    this.errorMessage = '';
+                    if (!this.workbook || !this.selectedSheet) return;
+                    const sheet = this.workbook.Sheets[this.selectedSheet];
+                    if (!sheet) return;
+                    // 2D array to preserve header row and types; parse dates where possible
+                    const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, cellDates: true, dateNF: 'yyyy-mm-dd\"T\"hh:mm:ss.000Z' });
+                    if (!aoa || aoa.length === 0) {
+                        this.columns = [];
+                        this.rows = [];
+                        this.rowCount = 0;
+                        this.previewRows = [];
+                        return;
+                    }
+                    const header = (aoa[0] || []).map(h => String(h || '').trim());
+                    const uniqueHeader = this.makeUniqueHeader(header);
+                    const objects = [];
+                    const MAX_ROWS = 65536;
+                    for (let r = 1; r < aoa.length && objects.length < MAX_ROWS; r++) {
+                        const row = aoa[r] || [];
+                        const obj = {};
+                        for (let c = 0; c < uniqueHeader.length; c++) {
+                            const key = uniqueHeader[c];
+                            let val = row[c];
+                            // Normalize Excel dates (as strings from raw:false or Date from cellDates)
+                            if (val instanceof Date) {
+                                val = new Date(val.getTime() - (val.getTimezoneOffset() * 60000)).toISOString();
+                            }
+                            obj[key] = val === undefined ? '' : val;
+                        }
+                        objects.push(obj);
+                    }
+                    this.columns = uniqueHeader;
+                    this.rows = objects;
+                    this.rowCount = objects.length;
+                    // Re-validate rules because columns changed
+                    this.validateRules();
+                    // Validate filename rule column selection
+                    this.validateFilenameRule();
+                    this.refreshPreview();
+                },
+
+                makeUniqueHeader(header) {
+                    const seen = new Map();
+                    return header.map((h, idx) => {
+                        let key = h || `Column_${idx + 1}`;
+                        key = String(key);
+                        if (!seen.has(key)) { seen.set(key, 0); return key; }
+                        const n = seen.get(key) + 1; seen.set(key, n);
+                        return `${key}_${n}`;
+                    });
+                },
+
+                addRule() {
+                    this.rules.push({ id: crypto.randomUUID(), source: '', target: '', error: 'Incomplete', missingSource: false });
+                },
+
+                removeRule(idx) {
+                    this.rules.splice(idx, 1);
+                    this.validateRules();
+                    this.refreshPreview();
+                },
+                shareLink() {
+                    try {
+                        const config = this.buildConfigObject();
+                        const encoded = this.encodeConfig(config);
+                        const url = new URL(window.location.href);
+                        url.searchParams.set('config', encoded);
+                        const finalUrl = url.toString();
+                        if (navigator.clipboard && navigator.clipboard.writeText) {
+                            navigator.clipboard.writeText(finalUrl);
+                            this.errorMessage = '';
+                            alert('Shareable link copied to clipboard');
+                        } else {
+                            prompt('Copy this URL', finalUrl);
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        this.errorMessage = 'Failed to create share link.';
+                    }
+                },
+
+                onFilenameRuleChange() {
+                    if (this.filenameRule.mode !== 'column') this.filenameRule.column = '';
+                    this.refreshPreview();
+                },
+
+                getExampleFilename() {
+                    if (this.filenameRule.mode === 'column' && this.filenameRule.column && this.rows.length > 0) {
+                        const sampleValue = this.rows[0][this.filenameRule.column];
+                        const base = sampleValue ? String(sampleValue).trim() : 'sample';
+                        const sanitized = this.sanitizeFilename(base) || '1';
+                        return `${sanitized}${this.filenameRule.suffix || ''}.json`;
+                    }
+                    return `1${this.filenameRule.suffix || ''}.json`;
+                },
+                buildConfigObject() {
+                    return {
+                        rules: this.rules.map(r => ({ source: r.source, target: r.target })).filter(r => r.source && r.target),
+                        filenameRule: { mode: this.filenameRule.mode, column: this.filenameRule.column || '', suffix: this.filenameRule.suffix || '' },
+                        options: { blanksAsNull: !!this.options.blanksAsNull },
+                        theme: this.theme,
+                    };
+                },
+                encodeConfig(obj) {
+                    const json = JSON.stringify(obj);
+                    const b64 = btoa(unescape(encodeURIComponent(json)));
+                    return b64;
+                },
+                decodeConfig(b64) {
+                    const json = decodeURIComponent(escape(atob(b64)));
+                    return JSON.parse(json);
+                },
+                loadConfigFromURL() {
+                    try {
+                        const params = new URLSearchParams(window.location.search);
+                        const c = params.get('config');
+                        if (!c) return;
+                        const obj = this.decodeConfig(c);
+                        if (obj && Array.isArray(obj.rules)) {
+                            this.rules = obj.rules.map(r => ({ id: crypto.randomUUID(), source: r.source || '', target: r.target || '', error: 'Incomplete', missingSource: false }));
+                        }
+                        if (obj && obj.filenameRule) {
+                            this.filenameRule = { 
+                                mode: obj.filenameRule.mode === 'column' ? 'column' : 'rowIndex', 
+                                column: obj.filenameRule.column || '',
+                                suffix: obj.filenameRule.suffix || ''
+                            };
+                        }
+                        if (obj && obj.options) {
+                            this.options.blanksAsNull = !!obj.options.blanksAsNull;
+                        }
+                        if (obj && obj.theme) {
+                            this.theme = obj.theme === 'dark' ? 'dark' : 'light';
+                        }
+                    } catch (e) {
+                        console.warn('Failed to load config from URL');
+                    }
+                },
+
+                theme: 'light',
+                applyTheme() {
+                    const html = document.documentElement;
+                    html.setAttribute('data-theme', this.theme);
+                },
+                toggleTheme() {
+                    this.theme = this.theme === 'dark' ? 'light' : 'dark';
+                    this.applyTheme();
+                },
+
+                validateRules() {
+                    for (const rule of this.rules) {
+                        rule.error = '';
+                        rule.missingSource = false;
+                        
+                        // If no columns loaded yet, don't show validation errors
+                        if (!this.columns || this.columns.length === 0) {
+                            rule.error = '';
+                            continue;
+                        }
+                        
+                        if (!rule.source || !rule.target) { rule.error = 'Incomplete'; continue; }
+                        if (!this.columns.includes(rule.source)) { rule.missingSource = true; }
+                        try {
+                            const steps = this.parsePath(rule.target);
+                            if (steps.length === 0) throw new Error('Empty path');
+                        } catch (e) {
+                            rule.error = 'Invalid path syntax';
+                        }
+                    }
+                    
+                    // Force DOM updates for rule source column dropdowns when columns are loaded
+                    if (this.columns && this.columns.length > 0) {
+                        setTimeout(() => {
+                            this.rules.forEach(rule => {
+                                if (rule.source && this.columns.includes(rule.source)) {
+                                    const tempSource = rule.source;
+                                    rule.source = '';
+                                    setTimeout(() => {
+                                        rule.source = tempSource;
+                                    }, 1);
+                                }
+                            });
+                        }, 1);
+                    }
+                },
+
+                validateFilenameRule() {
+                    // Force Alpine to re-evaluate the select options when columns change
+                    // This ensures that shared link column selections are preserved
+                    if (this.filenameRule.mode === 'column' && this.filenameRule.column) {
+                        const currentColumn = this.filenameRule.column;
+                        if (this.columns && this.columns.includes(currentColumn)) {
+                            // Force DOM update by clearing and resetting the value
+                            setTimeout(() => {
+                                this.filenameRule.column = '';
+                                setTimeout(() => {
+                                    this.filenameRule.column = currentColumn;
+                                }, 1);
+                            }, 1);
+                        }
+                    }
+                },
+
+                refreshPreview() {
+                    if (this.rows.length === 0 || this.rules.length === 0) {
+                        this.previewRows = [];
+                        return;
+                    }
+                    this.validateRules();
+                    if (!this.canExport) { this.previewRows = []; return; }
+                    const out = [];
+                    const stepsCache = new Map();
+                    const limit = Math.min(50, this.rows.length);
+                    for (let i = 0; i < limit; i++) {
+                        const row = this.rows[i];
+                        const mapped = this.applyRulesToRow(row, stepsCache);
+                        const fileName = this.computeFilenameForRow(i, row);
+                        out.push({ index: i, filename: fileName, json: JSON.stringify(mapped, null, 2) });
+                    }
+                    this.previewRows = out;
+                },
+
+                computeFilenameForRow(index, rowObj) {
+                    let base = '';
+                    if (this.filenameRule.mode === 'column' && this.filenameRule.column) {
+                        const candidate = rowObj[this.filenameRule.column];
+                        if (candidate != null) base = String(candidate).trim();
+                    }
+                    if (!base) base = String(index + 1);
+                    base = this.sanitizeFilename(base);
+                    if (!base) base = String(index + 1);
+                    const suffix = this.filenameRule.suffix || '';
+                    return `${base}${suffix}.json`;
+                },
+
+                sanitizeFilename(name) {
+                    // Remove illegal characters and trim
+                    let out = String(name).replace(/[\\\/:*?"<>|\u0000-\u001F]/g, ' ').trim();
+                    out = out.replace(/\s+/g, ' ').trim();
+                    // Avoid trailing dots/spaces
+                    out = out.replace(/[\. ]+$/g, '');
+                    return out.slice(0, 200);
+                },
+
+                applyRulesToRow(rowObj, stepsCache) {
+                    const result = {};
+                    for (const rule of this.rules) {
+                        if (!rule.source || !rule.target) continue;
+                        const rawValue = rowObj[rule.source];
+                        const isBlank = rawValue === '' || rawValue === undefined || rawValue === null;
+                        if (isBlank && !this.options.blanksAsNull) continue;
+                        const value = this.normalizeValue(rawValue);
+                        let steps = stepsCache.get(rule.target);
+                        if (!steps) { steps = this.parsePath(rule.target); stepsCache.set(rule.target, steps); }
+                        this.setBySteps(result, steps, isBlank ? null : value);
+                    }
+                    return result;
+                },
+
+                normalizeValue(v) {
+                    if (v instanceof Date) {
+                        return new Date(v.getTime() - (v.getTimezoneOffset() * 60000)).toISOString();
+                    }
+                    return v;
+                },
+
+                // Path parsing and setting
+                parsePath(path) {
+                    // Returns steps: [{type:'key',key},{type:'index',index}|{type:'push'}...]
+                    if (typeof path !== 'string') throw new Error('Path must be string');
+                    const s = path.trim();
+                    if (!s) return [];
+                    const steps = [];
+                    let i = 0;
+                    const len = s.length;
+                    function pushKey(key) { if (key === '') throw new Error('Empty key'); steps.push({ type: 'key', key }); }
+                    while (i < len) {
+                        // Read identifier or quoted key
+                        if (s[i] === '"' || s[i] === "'") {
+                            const quote = s[i++];
+                            let key = '';
+                            while (i < len && s[i] !== quote) {
+                                if (s[i] === '\\' && i + 1 < len) { key += s[i + 1]; i += 2; continue; }
+                                key += s[i++];
+                            }
+                            if (s[i] !== quote) throw new Error('Unterminated quoted key');
+                            i++; // skip closing quote
+                            pushKey(key);
+                        } else {
+                            // identifier until dot/bracket
+                            let key = '';
+                            while (i < len && s[i] !== '.' && s[i] !== '[') { key += s[i++]; }
+                            key = key.trim();
+                            if (key) pushKey(key);
+                        }
+                        // Process bracket/index/push chains
+                        while (i < len && s[i] === '[') {
+                            i++; // skip [
+                            if (s[i] === ']') {
+                                // push
+                                i++; // skip ]
+                                steps.push({ type: 'push' });
+                            } else if (s[i] === '"' || s[i] === "'") {
+                                // quoted key inside brackets
+                                const quote = s[i++];
+                                let key = '';
+                                while (i < len && s[i] !== quote) {
+                                    if (s[i] === '\\' && i + 1 < len) { key += s[i + 1]; i += 2; continue; }
+                                    key += s[i++];
+                                }
+                                if (s[i] !== quote) throw new Error('Unterminated quoted key');
+                                i++; // skip closing quote
+                                if (s[i] !== ']') throw new Error('Missing ]');
+                                i++; // skip ]
+                                steps.push({ type: 'key', key });
+                            } else {
+                                // index number
+                                let num = '';
+                                while (i < len && /[0-9]/.test(s[i])) { num += s[i++]; }
+                                if (s[i] !== ']') throw new Error('Missing ]');
+                                i++; // skip ]
+                                if (num === '') throw new Error('Empty index');
+                                steps.push({ type: 'index', index: Number(num) });
+                            }
+                        }
+                        if (i < len) {
+                            if (s[i] === '.') { i++; continue; }
+                            else throw new Error('Unexpected character in path');
+                        }
+                    }
+                    return steps;
+                },
+
+                setBySteps(target, steps, value) {
+                    let current = target;
+                    for (let i = 0; i < steps.length; i++) {
+                        const step = steps[i];
+                        const isLast = i === steps.length - 1;
+                        if (step.type === 'key') {
+                            if (isLast) {
+                                current[step.key] = value;
+                            } else {
+                                const next = steps[i + 1];
+                                if (next.type === 'index' || next.type === 'push') {
+                                    if (!Array.isArray(current[step.key])) current[step.key] = [];
+                                } else {
+                                    if (typeof current[step.key] !== 'object' || current[step.key] === null || Array.isArray(current[step.key])) current[step.key] = {};
+                                }
+                                current = current[step.key];
+                            }
+                        } else if (step.type === 'index') {
+                            if (!Array.isArray(current)) throw new Error('Expected array for index');
+                            const at = step.index;
+                            if (!current[at]) current[at] = {};
+                            if (isLast) {
+                                current[at] = value;
+                            } else {
+                                const next = steps[i + 1];
+                                if (next.type === 'index' || next.type === 'push') {
+                                    if (!Array.isArray(current[at])) current[at] = [];
+                                } else {
+                                    if (typeof current[at] !== 'object' || current[at] === null || Array.isArray(current[at])) current[at] = {};
+                                }
+                                current = current[at];
+                            }
+                        } else if (step.type === 'push') {
+                            if (!Array.isArray(current)) throw new Error('Expected array for push');
+                            if (isLast) {
+                                current.push(value);
+                            } else {
+                                const next = steps[i + 1];
+                                let container;
+                                if (next.type === 'index' || next.type === 'push') {
+                                    container = [];
+                                } else {
+                                    container = {};
+                                }
+                                current.push(container);
+                                current = container;
+                            }
+                        }
+                    }
+                },
+
+                async startExport() {
+                    try {
+                        this.errorMessage = '';
+                        this.validateRules();
+                        if (!this.canExport) return;
+                        if (this.rows.length === 0) return;
+                        
+                        this.isExporting = true;
+                        this.exportCurrent = 0;
+                        this.exportTotal = this.rows.length;
+                        this.exportProgressPct = 0;
+                        this.exportCancelled = false;
+
+                        const zip = new JSZip();
+                        const stepsCache = new Map();
+                        const CHUNK_SIZE = 250;
+
+                        // Process rows in chunks
+                        for (let i = 0; i < this.rows.length; i += CHUNK_SIZE) {
+                            if (this.exportCancelled) return;
+                            
+                            const chunkEnd = Math.min(i + CHUNK_SIZE, this.rows.length);
+                            await this.processChunk(zip, i, chunkEnd, stepsCache);
+                            
+                            // Update progress
+                            this.exportCurrent = chunkEnd;
+                            this.exportProgressPct = Math.round((chunkEnd / this.rows.length) * 100);
+                            
+                            // Yield to allow UI updates
+                            await this.yield();
+                        }
+
+                        if (this.exportCancelled) return;
+
+                        // Generate ZIP file
+                        const zipBlob = await zip.generateAsync({ type: 'blob' });
+                        const zipName = this.deriveZipName();
+                        saveAs(zipBlob, zipName);
+                        
+                        this.isExporting = false;
+                        this.exportProgressPct = 100;
+                    } catch (err) {
+                        console.error(err);
+                        this.isExporting = false;
+                        this.errorMessage = 'Export failed: ' + (err.message || 'Unknown error');
+                    }
+                },
+
+                async processChunk(zip, startIndex, endIndex, stepsCache) {
+                    for (let i = startIndex; i < endIndex; i++) {
+                        const row = this.rows[i];
+                        const mapped = this.applyRulesToRow(row, stepsCache);
+                        const fileName = this.computeFilenameForRow(i, row);
+                        zip.file(fileName, JSON.stringify(mapped, null, 2));
+                    }
+                },
+
+                async yield() {
+                    return new Promise(resolve => setTimeout(resolve, 0));
+                },
+
+                deriveZipName() {
+                    const base = this.fileName ? this.fileName.replace(/\.[^.]+$/, '') : 'export';
+                    return this.sanitizeFilename(base || 'export') + '.zip';
+                },
+
+                cancelExport() {
+                    this.exportCancelled = true;
+                    this.isExporting = false;
+                    this.exportProgressPct = 0;
+                },
+
+                get exportStatusText() {
+                    return ` ${this.exportCurrent} / ${this.exportTotal}`;
+                },
+
+            };
+        }
+    </script>
+</body>
+
+</html>
